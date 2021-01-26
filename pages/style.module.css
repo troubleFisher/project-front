@@ -1,0 +1,7 @@
+.drag {
+  border: 2px dashed #eee;
+  height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

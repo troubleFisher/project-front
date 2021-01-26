@@ -5,7 +5,6 @@ import axios from "../utils/axios";
 import md5 from "md5";
 import "antd/dist/antd.css";
 
-
 const layout = {
   labelCol: { span: 8 },
   wrapperCol: { span: 16 },
@@ -16,7 +15,6 @@ const tailLayout = {
 };
 
 const login = () => {
-
   const [form] = Form.useForm();
   const router = useRouter();
   const [captchaSrc, setCaptchaSrc] = useState("/api/captcha");
@@ -37,7 +35,7 @@ const login = () => {
   };
 
   const onFinishFailed = (errorInfo) => {
-    console.log("Failed:", errorInfo);
+    // 失败
   };
 
   const changeCaptcha = () => {

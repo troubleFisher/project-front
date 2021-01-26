@@ -29,7 +29,7 @@ const register = () => {
   };
 
   const onFinishFailed = (errorInfo) => {
-    console.log("Failed:", errorInfo);
+    // 失败
   };
 
   const changeCaptcha = () => {

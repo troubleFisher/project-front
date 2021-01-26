@@ -12,6 +12,7 @@ const instance = axios.create({
 instance.interceptors.response.use(
   (response) => {
     let { data } = response;
+
     if (data.code === -666) {
       Modal.info({
         title: "登陆过期",
@@ -22,7 +23,7 @@ instance.interceptors.response.use(
         ),
         onOk() {
           localStorage.removeItem("token");
-          // redirect("/login");
+          window.location = "/login";
         },
       });
     }

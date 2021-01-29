@@ -29,6 +29,7 @@ const register = () => {
   };
 
   const onFinishFailed = (errorInfo) => {
+    console.log("失败", errorInfo);
     // 失败
   };
 

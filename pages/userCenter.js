@@ -14,6 +14,7 @@ const UserCenter = () => {
   const drag = useRef(null);
   const test = async () => {
     const ret = await axios.get("/user/info");
+    console.log(ret);
   };
 
   const handleFileChange = (e) => {
@@ -132,12 +133,10 @@ const UserCenter = () => {
         });
       };
       const workLoop = async (deadline) => {
-        console.log(1);
         while (count < chunks.length && deadline.timeRemaining() > 1) {
           await appendToSpark(chunks[count].file);
           count++;
           if (count === chunks.length) {
-            console.log(2);
             setHashPercent(100);
             resolve(spark.end());
           } else {
@@ -151,17 +150,50 @@ const UserCenter = () => {
     });
   };
 
+  const calculateHashSample = () => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      const spark = new sparkMD5.ArrayBuffer();
+      const size = file.size;
+      const offset = 0.2 * 1024 * 1024;
+      // 第一个区块2M,最后一个区块全要,中间区块取前中后的2字节
+      const chunks = [file.slice(0, offset)];
+      let cur = offset;
+      while (cur < size) {
+        if (cur + offset >= size) {
+          chunks.push(file.slice(cur, size));
+        } else {
+          const mid = cur + offset / 2;
+          chunks.push(file.slice(cur, cur + 2));
+          chunks.push(file.slice(mid - 1, mid + 1));
+          chunks.push(file.slice(cur + offset - 2, cur + offset));
+        }
+        cur += offset;
+      }
+
+      reader.readAsArrayBuffer(new Blob(chunks));
+      reader.onload = (e) => {
+        spark.append(e.target.result);
+        setHashPercent(100);
+        resolve(spark.end());
+      };
+    });
+  };
+
   const upLoad = async () => {
-    // if (!(await isImage(file))) {
-    //   message.error("文件格式不对！");
-    //   return;
-    // }
     if (!file) return;
+    if (!(await isImage(file))) {
+      message.error("文件格式不对！");
+      return;
+    }
+
     const chunks = createFileChunk();
     const hash = await calculateHashWorker(chunks);
     const hash1 = await calculateHashIdle(chunks);
-    console.log("hash", hash, "hash1", hash1);
-    return;
+    // 抽样hash 不算全量
+    // 布隆过滤器 牺牲一部分精度换取极大的性能提升（可以做预判断）
+    const hash2 = await calculateHashSample();
+    console.log("hash", hash, hash1, hash2);
 
     const form = new FormData();
     form.append("name", "file");

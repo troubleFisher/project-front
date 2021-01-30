@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { Button, message, Progress } from "antd";
 import sparkMD5 from "spark-md5";
 import axios from "../utils/axios";
@@ -9,8 +9,10 @@ const CHUNK_SIZE = 0.1 * 1024 * 1024; //文件切片大小
 
 const UserCenter = () => {
   const [file, setFile] = useState(null);
-  const [percent, setPercent] = useState(0);
+  // const [percent, setPercent] = useState(0);
+  const [step, setStep] = useState(0);
   const [hashPercent, setHashPercent] = useState(0);
+  const [chunkPercent, setChunkPercent] = useState(0);
   const drag = useRef(null);
   const test = async () => {
     const ret = await axios.get("/user/info");
@@ -22,6 +24,9 @@ const UserCenter = () => {
     if (!file) {
       return;
     }
+    console.log(file.size);
+    const step = Math.ceil(file.size / CHUNK_SIZE);
+    setStep(step);
     setFile(file);
   };
 
@@ -180,6 +185,41 @@ const UserCenter = () => {
     });
   };
 
+  const mergeRequest = async (hash) => {
+    await axios.post("/mergeFile", {
+      ext: file.name.split(".").pop(),
+      size: CHUNK_SIZE,
+      hash,
+    });
+  };
+
+  const uploadChunks = async (chunksList, hash) => {
+    const request = chunksList
+      .map((item) => {
+        const form = new FormData();
+        form.append("chunk", item.chunk);
+        form.append("hash", item.hash);
+        form.append("name", item.name);
+        const index = item.index;
+        return { form, index };
+      })
+      .map(({ form, index }) =>
+        axios.post("/uploadFile", form, {
+          // 不是整体进度条,而是单个进度条,整体进度条需单独计算
+          onUploadProgress: (progress) => {
+            const partPercent = Number(
+              ((progress.loaded / progress.total) * (100 / step)).toFixed(2)
+            );
+            setChunkPercent((chunkPercent) =>
+              Math.ceil(chunkPercent + partPercent)
+            );
+          },
+        })
+      );
+    await Promise.all(request);
+    await mergeRequest(hash);
+  };
+
   const upLoad = async () => {
     if (!file) return;
     if (!(await isImage(file))) {
@@ -188,24 +228,36 @@ const UserCenter = () => {
     }
 
     const chunks = createFileChunk();
-    const hash = await calculateHashWorker(chunks);
-    const hash1 = await calculateHashIdle(chunks);
+    // const hash = await calculateHashWorker(chunks);
+    // const hash1 = await calculateHashIdle(chunks);
     // 抽样hash 不算全量
     // 布隆过滤器 牺牲一部分精度换取极大的性能提升（可以做预判断）
-    const hash2 = await calculateHashSample();
-    console.log("hash", hash, hash1, hash2);
+    const hash = await calculateHashSample();
 
-    const form = new FormData();
-    form.append("name", "file");
-    form.append("file", file);
-    await axios.post("uploadFile", form, {
-      onUploadProgress: (progress) => {
-        const progress1 = Number(
-          ((progress.loaded / progress.total) * 100).toFixed(2)
-        );
-        setPercent(progress1);
-      },
+    const chunksList = chunks.map((i, index) => {
+      // 切片的名字 hash+index
+      const name = hash + "_" + index;
+      return {
+        hash,
+        name,
+        index,
+        chunk: i.file,
+      };
     });
+
+    await uploadChunks(chunksList, hash);
+
+    // const form = new FormData();
+    // form.append("name", "file");
+    // form.append("file", file);
+    // await axios.post("uploadFile", form, {
+    //   onUploadProgress: (progress) => {
+    //     const progress1 = Number(
+    //       ((progress.loaded / progress.total) * 100).toFixed(2)
+    //     );
+    //     setPercent(progress1);
+    //   },
+    // });
   };
 
   return (
@@ -223,13 +275,13 @@ const UserCenter = () => {
       >
         <input type="file" name="file" onChange={handleFileChange} />
       </div>
-      <Progress
+      {/* <Progress
         percent={percent}
         strokeColor={{
           "0%": "#108ee9",
           "100%": "#87d068",
         }}
-      />
+      /> */}
       <div>计算hash值的进度条</div>
       <Progress
         percent={hashPercent}
@@ -238,6 +290,13 @@ const UserCenter = () => {
           "100%": "#87d068",
         }}
       />
+      {!!step && (
+        <>
+          <div>文件切片上传的进度条</div>
+          <Progress percent={chunkPercent} steps={step} strokeColor="#52c41a" />
+        </>
+      )}
+
       <Button onClick={upLoad}>上传</Button>
     </div>
   );

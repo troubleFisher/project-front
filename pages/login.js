@@ -46,7 +46,7 @@ const login = () => {
 
   const sendEmailCode = async () => {
     const { getFieldValue } = form;
-    const email = getFieldValue("emailCode");
+    const email = getFieldValue("email");
     await axios.get(`/sendCode?email=${email}`);
     let time = 10;
     setDisabled(true);
@@ -75,7 +75,7 @@ const login = () => {
         <Form.Item
           label="邮箱"
           name="email"
-          initialValue="124@qq.com"
+          initialValue="951325316@qq.com"
           rules={[
             { required: true, message: "请填写邮箱!" },
             { type: "email" },

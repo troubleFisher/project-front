@@ -5,9 +5,10 @@ import axios from "../utils/axios";
 import style from "./style.module.css";
 import "antd/dist/antd.css";
 
-const CHUNK_SIZE = 0.1 * 1024 * 1024; //文件切片大小
+const CHUNK_SIZE = 0.1 * 1024 * 1000; //文件切片大小
 
 const UserCenter = () => {
+  const [info, setInfo] = useState({});
   const [file, setFile] = useState(null);
   // const [percent, setPercent] = useState(0);
   const [step, setStep] = useState(0);
@@ -15,16 +16,18 @@ const UserCenter = () => {
   const [chunkPercent, setChunkPercent] = useState(0);
   const drag = useRef(null);
   const test = async () => {
-    const ret = await axios.get("/user/info");
-    console.log(ret);
+    const { data } = await axios.get("/user/info");
+    setInfo(data);
   };
 
   const handleFileChange = (e) => {
+    setStep(0);
+    setChunkPercent(0);
+    setHashPercent(0);
     const [file] = e.target.files;
     if (!file) {
       return;
     }
-    console.log(file.size);
     const step = Math.ceil(file.size / CHUNK_SIZE);
     setStep(step);
     setFile(file);
@@ -87,7 +90,6 @@ const UserCenter = () => {
     const len = file.size;
     const start = await blobToString(file.slice(0, 2));
     const end = await blobToString(file.slice(-2, len));
-    console.log("start,end", start, end);
     const isJpeg = start === "FF D8" && end === "FF D9";
     return isJpeg;
   };
@@ -107,53 +109,53 @@ const UserCenter = () => {
     return chunks;
   };
 
-  const calculateHashWorker = async (chunks) => {
-    // web worker另开一个线程做计算
-    return new Promise((resolve) => {
-      const worker = new Worker("./hash.js");
-      worker.postMessage({ chunks });
-      worker.onmessage = (e) => {
-        const { progress, hash } = e.data;
-        setHashPercent(Number(progress.toFixed(2)));
-        if (hash) {
-          resolve(hash);
-        }
-      };
-    });
-  };
+  // const calculateHashWorker = async (chunks) => {
+  //   // web worker另开一个线程做计算
+  //   return new Promise((resolve) => {
+  //     const worker = new Worker("./hash.js");
+  //     worker.postMessage({ chunks });
+  //     worker.onmessage = (e) => {
+  //       const { progress, hash } = e.data;
+  //       setHashPercent(Number(progress.toFixed(2)));
+  //       if (hash) {
+  //         resolve(hash);
+  //       }
+  //     };
+  //   });
+  // };
 
-  const calculateHashIdle = async (chunks) => {
-    return new Promise((resolve) => {
-      const spark = new sparkMD5.ArrayBuffer();
-      let count = 0;
+  // const calculateHashIdle = async (chunks) => {
+  //   return new Promise((resolve) => {
+  //     const spark = new sparkMD5.ArrayBuffer();
+  //     let count = 0;
 
-      const appendToSpark = (chunk) => {
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.readAsArrayBuffer(chunk);
-          reader.onload = (e) => {
-            spark.append(e.target.result);
-            resolve();
-          };
-        });
-      };
-      const workLoop = async (deadline) => {
-        while (count < chunks.length && deadline.timeRemaining() > 1) {
-          await appendToSpark(chunks[count].file);
-          count++;
-          if (count === chunks.length) {
-            setHashPercent(100);
-            resolve(spark.end());
-          } else {
-            const progress = Number(((100 * count) / chunks.length).toFixed(2));
-            setHashPercent(progress);
-          }
-        }
-        window.requestIdleCallback(workLoop);
-      };
-      window.requestIdleCallback(workLoop);
-    });
-  };
+  //     const appendToSpark = (chunk) => {
+  //       return new Promise((resolve) => {
+  //         const reader = new FileReader();
+  //         reader.readAsArrayBuffer(chunk);
+  //         reader.onload = (e) => {
+  //           spark.append(e.target.result);
+  //           resolve();
+  //         };
+  //       });
+  //     };
+  //     const workLoop = async (deadline) => {
+  //       while (count < chunks.length && deadline.timeRemaining() > 1) {
+  //         await appendToSpark(chunks[count].file);
+  //         count++;
+  //         if (count === chunks.length) {
+  //           setHashPercent(100);
+  //           resolve(spark.end());
+  //         } else {
+  //           const progress = Number(((100 * count) / chunks.length).toFixed(2));
+  //           setHashPercent(progress);
+  //         }
+  //       }
+  //       window.requestIdleCallback(workLoop);
+  //     };
+  //     window.requestIdleCallback(workLoop);
+  //   });
+  // };
 
   const calculateHashSample = () => {
     return new Promise((resolve) => {
@@ -193,8 +195,52 @@ const UserCenter = () => {
     });
   };
 
-  const uploadChunks = async (chunksList, hash) => {
+  const sendRequest = (chunks, limit = 4) => {
+    return new Promise((resolve, reject) => {
+      const len = chunks.length; // 切片长度
+      let count = 0;
+
+      const start = async () => {
+        const task = chunks.shift();
+        if (task) {
+          const { form } = task;
+          await axios.post("/uploadFile", form, {
+            // 不是整体进度条,而是单个进度条,整体进度条需单独计算
+            onUploadProgress: (progress) => {
+              const partPercent = Number(progress.loaded / progress.total);
+              if (partPercent === 1) {
+                const currentPercent = Math.ceil(100 / step);
+                setChunkPercent(
+                  (chunkPercent) => chunkPercent + currentPercent
+                );
+              }
+            },
+          });
+          if (count == len - 1) {
+            // 最后一个任务
+            resolve();
+          } else {
+            count++;
+            // 并且启动下一个任务
+            start();
+          }
+        }
+      };
+
+      while (limit > 0) {
+        //  启动limit个任务
+        //  模拟时长不同的启动
+        setTimeout(() => {
+          start();
+        }, Math.random() * 2000);
+        limit -= 1;
+      }
+    });
+  };
+
+  const uploadChunks = async (chunksList, uploadedList, hash) => {
     const request = chunksList
+      .filter((i) => uploadedList.indexOf(i.name) === -1)
       .map((item) => {
         const form = new FormData();
         form.append("chunk", item.chunk);
@@ -202,21 +248,11 @@ const UserCenter = () => {
         form.append("name", item.name);
         const index = item.index;
         return { form, index };
-      })
-      .map(({ form, index }) =>
-        axios.post("/uploadFile", form, {
-          // 不是整体进度条,而是单个进度条,整体进度条需单独计算
-          onUploadProgress: (progress) => {
-            const partPercent = Number(
-              ((progress.loaded / progress.total) * (100 / step)).toFixed(2)
-            );
-            setChunkPercent((chunkPercent) =>
-              Math.ceil(chunkPercent + partPercent)
-            );
-          },
-        })
-      );
-    await Promise.all(request);
+      });
+    // 尝试申请TCP链接过多,也会造成卡顿
+    // 异步并发数控制
+    await sendRequest(request);
+    // await Promise.all(request);
     await mergeRequest(hash);
   };
 
@@ -234,6 +270,24 @@ const UserCenter = () => {
     // 布隆过滤器 牺牲一部分精度换取极大的性能提升（可以做预判断）
     const hash = await calculateHashSample();
 
+    // 判断文件是否上传过，如果没有，是否有存在切片
+    const {
+      data: { uploaded, uploadedList },
+    } = await axios.post("/checkFile", {
+      hash,
+      ext: file.name.split(".").pop(),
+    });
+
+    if (uploaded) {
+      // 秒传
+      message.success("秒传成功");
+      setChunkPercent(100);
+      return;
+    } else {
+      const percent = Math.ceil((uploadedList.length * 100) / step);
+
+      setChunkPercent(percent);
+    }
     const chunksList = chunks.map((i, index) => {
       // 切片的名字 hash+index
       const name = hash + "_" + index;
@@ -245,7 +299,7 @@ const UserCenter = () => {
       };
     });
 
-    await uploadChunks(chunksList, hash);
+    await uploadChunks(chunksList, uploadedList, hash);
 
     // const form = new FormData();
     // form.append("name", "file");
@@ -262,7 +316,7 @@ const UserCenter = () => {
 
   return (
     <div style={{ width: "80%" }}>
-      <Button onClick={test}>test</Button>
+      <Button onClick={test}>{info.username || "请登录"}</Button>
       <div
         css={{ backgroundColor: "red" }}
         ref={drag}

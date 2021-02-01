@@ -199,30 +199,44 @@ const UserCenter = () => {
     return new Promise((resolve, reject) => {
       const len = chunks.length; // 切片长度
       let count = 0;
+      let isStop = false;
 
       const start = async () => {
+        if (isStop) return;
         const task = chunks.shift();
         if (task) {
           const { form } = task;
-          await axios.post("/uploadFile", form, {
-            // 不是整体进度条,而是单个进度条,整体进度条需单独计算
-            onUploadProgress: (progress) => {
-              const partPercent = Number(progress.loaded / progress.total);
-              if (partPercent === 1) {
-                const currentPercent = Math.ceil(100 / step);
-                setChunkPercent(
-                  (chunkPercent) => chunkPercent + currentPercent
-                );
-              }
-            },
-          });
-          if (count == len - 1) {
-            // 最后一个任务
-            resolve();
-          } else {
-            count++;
-            // 并且启动下一个任务
-            start();
+          try {
+            await axios.post("/uploadFile", form, {
+              // 不是整体进度条,而是单个进度条,整体进度条需单独计算
+              onUploadProgress: (progress) => {
+                const partPercent = Number(progress.loaded / progress.total);
+                if (partPercent === 1) {
+                  const currentPercent = Math.ceil(100 / step);
+                  setChunkPercent(
+                    (chunkPercent) => chunkPercent + currentPercent
+                  );
+                }
+              },
+            });
+
+            if (count == len - 1) {
+              // 最后一个任务
+              resolve();
+            } else {
+              count++;
+              // 并且启动下一个任务
+              start();
+            }
+          } catch (error) {
+            if (task.err < 3) {
+              task.err++;
+              chunks.unshift(task);
+              start();
+            } else {
+              isStop = true;
+              reject();
+            }
           }
         }
       };
@@ -247,10 +261,10 @@ const UserCenter = () => {
         form.append("hash", item.hash);
         form.append("name", item.name);
         const index = item.index;
-        return { form, index };
+        return { form, index, err: 0 };
       });
     // 尝试申请TCP链接过多,也会造成卡顿
-    // 异步并发数控制
+    // 异步并发数控制,报错重试(同一请求重试三次，三次都失败则停止重试并输出错误)
     await sendRequest(request);
     // await Promise.all(request);
     await mergeRequest(hash);
